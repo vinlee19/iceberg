@@ -1,0 +1,401 @@
+name: Daily Sync Fork & PR Analysis Report
+
+on:
+  schedule:
+    # 每天 UTC 01:00 运行（北京时间 09:00）
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+    inputs:
+      report_date:
+        description: '分析日期 (YYYY-MM-DD)，默认为昨天'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync-and-report:
+    name: Sync Fork & Generate Daily Report
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      # ─── Step 1: Sync fork with upstream ───────────────────────────────────
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/apache/iceberg.git || true
+          git remote -v
+
+      - name: Fetch upstream main
+        run: |
+          git fetch upstream main --depth=200
+          echo "UPSTREAM_SHA=$(git rev-parse upstream/main)" >> $GITHUB_ENV
+
+      - name: Sync fork main with upstream
+        run: |
+          git checkout main
+          git reset --hard upstream/main
+          git push origin main --force-with-lease
+          echo "✅ Fork main synced to $(git rev-parse --short HEAD)"
+
+      # ─── Step 2: Determine report date ─────────────────────────────────────
+      - name: Set report date
+        run: |
+          if [ -n "${{ inputs.report_date }}" ]; then
+            REPORT_DATE="${{ inputs.report_date }}"
+          else
+            REPORT_DATE=$(date -u -d "yesterday" +%Y-%m-%d)
+          fi
+          echo "REPORT_DATE=$REPORT_DATE" >> $GITHUB_ENV
+          echo "Analyzing date: $REPORT_DATE"
+
+      # ─── Step 3: Collect merged PRs from git log ────────────────────────────
+      - name: Collect merged PRs data
+        run: |
+          git fetch upstream main --depth=500
+
+          SINCE="${REPORT_DATE} 00:00:00"
+          UNTIL="${REPORT_DATE} 23:59:59"
+
+          echo "## Merged PRs on $REPORT_DATE" > /tmp/merged_prs.txt
+          git log upstream/main \
+            --since="$SINCE" --until="$UNTIL" \
+            --format="SHA:%H|TITLE:%s|AUTHOR:%an|DATE:%ai" \
+            >> /tmp/merged_prs.txt
+
+          echo "PR_COUNT=$(git log upstream/main --since="$SINCE" --until="$UNTIL" --oneline | wc -l)" >> $GITHUB_ENV
+          cat /tmp/merged_prs.txt
+
+      # ─── Step 4: Collect file stats for each merged PR ──────────────────────
+      - name: Collect PR diff stats
+        run: |
+          git fetch upstream main --depth=500
+          SINCE="${REPORT_DATE} 00:00:00"
+          UNTIL="${REPORT_DATE} 23:59:59"
+
+          echo "" > /tmp/pr_stats.txt
+          while IFS= read -r line; do
+            if [[ $line == SHA:* ]]; then
+              SHA=$(echo "$line" | sed 's/SHA:\([^|]*\).*/\1/')
+              TITLE=$(echo "$line" | sed 's/.*TITLE:\([^|]*\).*/\1/')
+              echo "=== $TITLE ===" >> /tmp/pr_stats.txt
+              git show "$SHA" --stat --no-patch 2>/dev/null | tail -1 >> /tmp/pr_stats.txt
+              git show "$SHA" --name-only --no-patch 2>/dev/null | grep -v "^commit\|^Author\|^Date\|^$\|^    " | head -20 >> /tmp/pr_stats.txt
+              echo "" >> /tmp/pr_stats.txt
+            fi
+          done < /tmp/merged_prs.txt
+          cat /tmp/pr_stats.txt
+
+      # ─── Step 5: Generate report using Claude API ──────────────────────────
+      - name: Generate analysis report
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Collect all PR data
+          git fetch upstream main --depth=500
+          SINCE="${REPORT_DATE} 00:00:00"
+          UNTIL="${REPORT_DATE} 23:59:59"
+
+          PR_DATA=""
+          while IFS= read -r sha_line; do
+            [[ -z "$sha_line" ]] && continue
+            SHA=$(git log upstream/main --since="$SINCE" --until="$UNTIL" --format="%H" | head -1)
+            break
+          done
+
+          # Build full PR list with details
+          FULL_DATA=$(git log upstream/main \
+            --since="$SINCE" --until="$UNTIL" \
+            --format="PR_NUMBER: %s%nAUTHOR: %an%nDATE: %ai%nBODY: %b%n---" 2>/dev/null)
+
+          # Also collect stats
+          STATS_DATA=$(git log upstream/main --since="$SINCE" --until="$UNTIL" \
+            --format="%H" | while read sha; do
+              echo "=== $(git log $sha -1 --format='%s') ==="
+              git show $sha --stat --no-patch 2>/dev/null | tail -3
+              echo ""
+            done)
+
+          echo "$FULL_DATA" > /tmp/full_pr_data.txt
+          echo "$STATS_DATA" >> /tmp/full_pr_data.txt
+
+          # Fetch new PRs and issues via GitHub API
+          NEW_PRS=$(curl -s \
+            -H "Authorization: token $GH_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/apache/iceberg/pulls?state=open&sort=created&direction=desc&per_page=30" \
+            | python3 -c "
+          import json,sys
+          from datetime import datetime
+          data = json.load(sys.stdin)
+          report_date = '${REPORT_DATE}'
+          for pr in data:
+              created = pr.get('created_at','')[:10]
+              if created == report_date:
+                  print(f\"#{pr['number']} | {pr['title']} | {pr['user']['login']}\")
+          " 2>/dev/null || echo "Unable to fetch new PRs")
+
+          NEW_ISSUES=$(curl -s \
+            -H "Authorization: token $GH_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/apache/iceberg/issues?state=all&sort=created&direction=desc&per_page=30&since=${REPORT_DATE}T00:00:00Z" \
+            | python3 -c "
+          import json,sys
+          data = json.load(sys.stdin)
+          report_date = '${REPORT_DATE}'
+          for item in data:
+              if 'pull_request' in item: continue
+              created = item.get('created_at','')[:10]
+              if created == report_date:
+                  labels = ','.join(l['name'] for l in item.get('labels',[]))
+                  print(f\"#{item['number']} | {item['title']} | {labels} | {item['state']}\")
+          " 2>/dev/null || echo "Unable to fetch new issues")
+
+          echo "NEW_PRS<<EOF" >> $GITHUB_ENV
+          echo "$NEW_PRS" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+          echo "NEW_ISSUES<<EOF" >> $GITHUB_ENV
+          echo "$NEW_ISSUES" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+          cat /tmp/full_pr_data.txt
+
+      # ─── Step 6: Write report file ──────────────────────────────────────────
+      - name: Write report to file
+        run: |
+          mkdir -p reports/daily
+
+          git fetch upstream main --depth=500
+          SINCE="${REPORT_DATE} 00:00:00"
+          UNTIL="${REPORT_DATE} 23:59:59"
+          SYNC_SHA=$(git rev-parse --short upstream/main)
+
+          # Generate report using Python
+          python3 << 'PYEOF'
+          import subprocess, os, json
+          from datetime import datetime, timedelta
+
+          report_date = os.environ["REPORT_DATE"]
+          sync_sha = os.environ.get("UPSTREAM_SHA", "")[:7]
+          since = f"{report_date} 00:00:00"
+          until = f"{report_date} 23:59:59"
+          new_prs_raw = os.environ.get("NEW_PRS", "")
+          new_issues_raw = os.environ.get("NEW_ISSUES", "")
+
+          # Get merged PRs
+          result = subprocess.run(
+              ["git", "log", "upstream/main",
+               f"--since={since}", f"--until={until}",
+               "--format=%H|%s|%an|%ai"],
+              capture_output=True, text=True
+          )
+          merged = []
+          for line in result.stdout.strip().split("\n"):
+              if not line: continue
+              parts = line.split("|", 3)
+              if len(parts) >= 4:
+                  sha, title, author, date = parts
+                  # Get stats
+                  stat_result = subprocess.run(
+                      ["git", "show", sha, "--stat", "--no-patch"],
+                      capture_output=True, text=True
+                  )
+                  stats = stat_result.stdout.strip().split("\n")[-1] if stat_result.stdout else ""
+                  files_result = subprocess.run(
+                      ["git", "show", sha, "--name-only", "--no-patch"],
+                      capture_output=True, text=True
+                  )
+                  files = [f for f in files_result.stdout.strip().split("\n")
+                           if f and not f.startswith(("commit", "Author", "Date", " "))]
+                  merged.append({
+                      "sha": sha[:7], "title": title, "author": author,
+                      "date": date, "stats": stats, "files": files[:10]
+                  })
+
+          # Categorize
+          def categorize(title):
+              t = title.lower()
+              if "fix" in t or "bug" in t: return "🐛 Bug 修复"
+              if "test" in t: return "🧪 测试相关"
+              if "backport" in t: return "🔀 Backport"
+              if "ci:" in t or "infra" in t or "gitignore" in t or ".claude" in t: return "⚙️ 基础设施"
+              if "doc" in t: return "📚 文档"
+              if "remove" in t or "deprecat" in t: return "🧹 清理"
+              return "🚀 特性/增强"
+
+          report_lines = [
+              f"# Apache Iceberg 日报 — {report_date}",
+              "",
+              f"> **Fork 同步状态：** ✅ `vinlee19/iceberg` 已与 `apache/iceberg@main` 完成同步（`{sync_sha}`）",
+              f">",
+              f"> **数据范围：** {report_date} 00:00 UTC ~ {report_date} 23:59 UTC",
+              f">",
+              f"> **生成时间：** {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}（自动生成）",
+              "",
+              "---",
+              "",
+              "## 📊 当日活动概览",
+              "",
+              "| 类别 | 数量 |",
+              "|------|------|",
+              f"| ✅ 合并 PR | {len(merged)} |",
+              f"| 🆕 新建 PR | {len([l for l in new_prs_raw.splitlines() if l.strip()])} |",
+              f"| 🐛 新建 Issue | {len([l for l in new_issues_raw.splitlines() if l.strip()])} |",
+              "",
+              "---",
+              "",
+              "## ✅ 已合并 PR 列表",
+              "",
+              "| PR | 标题 | 作者 | 类型 | 变更规模 |",
+              "|----|------|------|------|----------|",
+          ]
+
+          for pr in merged:
+              pr_num = ""
+              title = pr["title"]
+              import re
+              m = re.search(r'\(#(\d+)\)$', title)
+              if m:
+                  pr_num = m.group(1)
+                  title_clean = title[:title.rfind("(#")].strip()
+              else:
+                  title_clean = title
+              cat = categorize(pr["title"])
+              link = f"[#{pr_num}](https://github.com/apache/iceberg/pull/{pr_num})" if pr_num else pr["sha"]
+              report_lines.append(f"| {link} | {title_clean[:60]} | {pr['author']} | {cat} | {pr['stats']} |")
+
+          report_lines += [
+              "",
+              "---",
+              "",
+              "## 🔍 合并 PR 详细分析",
+              "",
+          ]
+
+          for pr in merged:
+              title = pr["title"]
+              import re
+              m = re.search(r'\(#(\d+)\)$', title)
+              pr_num = m.group(1) if m else ""
+              title_clean = title[:title.rfind("(#")].strip() if m else title
+              cat = categorize(title)
+
+              report_lines += [
+                  f"### {cat} PR #{pr_num} — {title_clean}",
+                  "",
+                  f"| 属性 | 详情 |",
+                  f"|------|------|",
+                  f"| **作者** | {pr['author']} |",
+                  f"| **合并时间** | {pr['date']} |",
+                  f"| **变更统计** | {pr['stats']} |",
+                  f"| **GitHub** | [查看 PR](https://github.com/apache/iceberg/pull/{pr_num}) |",
+                  "",
+                  "**主要修改文件：**",
+                  "",
+              ]
+              for f in pr["files"][:8]:
+                  if f:
+                      report_lines.append(f"- `{f}`")
+              report_lines.append("")
+              report_lines.append("---")
+              report_lines.append("")
+
+          # New PRs section
+          report_lines += [
+              "## 🆕 当日新提交 PR",
+              "",
+          ]
+          if new_prs_raw.strip():
+              report_lines += [
+                  "| PR | 标题 | 作者 |",
+                  "|----|------|------|",
+              ]
+              for line in new_prs_raw.strip().splitlines():
+                  parts = line.split("|")
+                  if len(parts) >= 3:
+                      num = parts[0].strip().lstrip("#")
+                      title = parts[1].strip()
+                      author = parts[2].strip()
+                      report_lines.append(f"| [#{num}](https://github.com/apache/iceberg/pull/{num}) | {title} | {author} |")
+          else:
+              report_lines.append("*当日无新建 PR（或数据获取失败）*")
+
+          report_lines += [
+              "",
+              "---",
+              "",
+              "## 🐛 当日新建 Issue",
+              "",
+          ]
+          if new_issues_raw.strip():
+              report_lines += [
+                  "| Issue | 标题 | 标签 | 状态 |",
+                  "|-------|------|------|------|",
+              ]
+              for line in new_issues_raw.strip().splitlines():
+                  parts = line.split("|")
+                  if len(parts) >= 4:
+                      num = parts[0].strip().lstrip("#")
+                      title = parts[1].strip()
+                      labels = parts[2].strip()
+                      state = parts[3].strip()
+                      icon = "🔴" if state == "open" else "✅"
+                      report_lines.append(f"| [#{num}](https://github.com/apache/iceberg/issues/{num}) | {title} | {labels} | {icon} {state} |")
+          else:
+              report_lines.append("*当日无新建 Issue（或数据获取失败）*")
+
+          report_lines += [
+              "",
+              "---",
+              "",
+              "*报告由 [daily-sync-and-report.yml](/.github/workflows/daily-sync-and-report.yml) 自动生成*",
+              f"*数据来源：[apache/iceberg](https://github.com/apache/iceberg)*",
+          ]
+
+          output_path = f"reports/daily/{report_date}.md"
+          with open(output_path, "w") as f:
+              f.write("\n".join(report_lines))
+          print(f"✅ Report written to {output_path}")
+          PYEOF
+
+      # ─── Step 7: Commit and push report ─────────────────────────────────────
+      - name: Commit and push report
+        run: |
+          git checkout claude/happy-ride-cqGeV || git checkout -b claude/happy-ride-cqGeV
+
+          mkdir -p reports/daily
+          cp /tmp/report_*.md reports/daily/ 2>/dev/null || true
+
+          if [ -f "reports/daily/${REPORT_DATE}.md" ]; then
+            git add "reports/daily/${REPORT_DATE}.md"
+          fi
+
+          git diff --cached --quiet && echo "No changes to commit" && exit 0
+
+          git commit -m "report: Add daily analysis for ${REPORT_DATE} (${PR_COUNT} merged PRs)"
+          git push -u origin claude/happy-ride-cqGeV
+          echo "✅ Report committed and pushed"
+
+      - name: Summary
+        run: |
+          echo "## 🎉 Daily Sync Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Date analyzed:** $REPORT_DATE" >> $GITHUB_STEP_SUMMARY
+          echo "- **Merged PRs:** $PR_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "- **Upstream SHA:** $UPSTREAM_SHA" >> $GITHUB_STEP_SUMMARY
+          echo "- **Report:** \`reports/daily/$REPORT_DATE.md\`" >> $GITHUB_STEP_SUMMARY
