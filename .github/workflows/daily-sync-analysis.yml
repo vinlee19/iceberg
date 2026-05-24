@@ -1,0 +1,100 @@
+name: Daily Sync & Analysis
+
+on:
+  schedule:
+    # 每天 UTC 00:05 运行（北京时间 08:05）
+    - cron: "5 0 * * *"
+  workflow_dispatch:
+    inputs:
+      report_date:
+        description: "Report date (YYYY-MM-DD, defaults to yesterday)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  sync-and-report:
+    name: Sync fork & generate daily report
+    runs-on: ubuntu-latest
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── 2. Configure git ─────────────────────────────────────────
+      - name: Configure git
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      # ── 3. Add upstream & sync main ──────────────────────────────
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/apache/iceberg.git || true
+
+      - name: Fetch upstream main
+        run: git fetch upstream main
+
+      - name: Sync fork main with upstream
+        run: |
+          git checkout main
+          git merge --ff-only upstream/main || {
+            echo "[WARN] Fast-forward failed, performing rebase merge"
+            git merge -X theirs upstream/main \
+              -m "chore: sync with apache/iceberg main $(date -u +%Y-%m-%d)"
+          }
+          git push origin main
+
+      # ── 4. Determine report date ─────────────────────────────────
+      - name: Set report date
+        id: date
+        run: |
+          INPUT="${{ github.event.inputs.report_date }}"
+          if [ -n "$INPUT" ]; then
+            echo "report_date=$INPUT" >> "$GITHUB_OUTPUT"
+          else
+            echo "report_date=$(date -u -d 'yesterday' '+%Y-%m-%d')" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── 5. Generate report ───────────────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Generate daily report
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 scripts/generate_daily_report.py "${{ steps.date.outputs.report_date }}"
+
+      # ── 6. Commit & push report ──────────────────────────────────
+      - name: Commit report
+        run: |
+          DATE="${{ steps.date.outputs.report_date }}"
+          git add reports/
+          if git diff --cached --quiet; then
+            echo "[INFO] No changes to commit (report may already exist)"
+          else
+            git commit -m "docs: add daily analysis report for ${DATE}"
+            git push origin main
+          fi
+
+      # ── 7. Summary ───────────────────────────────────────────────
+      - name: Job summary
+        run: |
+          DATE="${{ steps.date.outputs.report_date }}"
+          echo "## Daily Sync & Report ✅" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Synced**: \`vinlee19/iceberg\` main ← \`apache/iceberg\` main" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Report**: \`reports/${DATE}.md\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f "reports/${DATE}.md" ]; then
+            echo "### Preview" >> "$GITHUB_STEP_SUMMARY"
+            head -60 "reports/${DATE}.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
