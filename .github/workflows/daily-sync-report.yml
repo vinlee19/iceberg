@@ -1,0 +1,204 @@
+name: Daily Sync & Report
+
+on:
+  schedule:
+    # 每天 UTC 00:30 执行（北京时间 08:30）
+    - cron: '30 0 * * *'
+  workflow_dispatch:
+    inputs:
+      report_date:
+        description: '分析日期 (YYYY-MM-DD, 默认为昨天)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  sync-and-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream and sync fork
+        run: |
+          git remote add upstream https://github.com/apache/iceberg.git
+          git fetch upstream main --depth=100
+
+          # 记录同步前后的 commit
+          BEFORE=$(git rev-parse HEAD)
+          git merge upstream/main --no-edit || git merge --abort
+          AFTER=$(git rev-parse HEAD)
+
+          echo "SYNC_BEFORE=${BEFORE}" >> $GITHUB_ENV
+          echo "SYNC_AFTER=${AFTER}" >> $GITHUB_ENV
+
+          if [ "$BEFORE" = "$AFTER" ]; then
+            echo "SYNCED_NEW_COMMITS=0" >> $GITHUB_ENV
+          else
+            COUNT=$(git log ${BEFORE}..${AFTER} --oneline | wc -l)
+            echo "SYNCED_NEW_COMMITS=${COUNT}" >> $GITHUB_ENV
+          fi
+
+      - name: Determine report date
+        run: |
+          if [ -n "${{ github.event.inputs.report_date }}" ]; then
+            REPORT_DATE="${{ github.event.inputs.report_date }}"
+          else
+            REPORT_DATE=$(date -u -d 'yesterday' '+%Y-%m-%d')
+          fi
+          echo "REPORT_DATE=${REPORT_DATE}" >> $GITHUB_ENV
+          echo "Report date: ${REPORT_DATE}"
+
+      - name: Fetch apache/iceberg activity via GitHub API
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DATE="${REPORT_DATE}"
+          NEXT_DATE=$(date -d "${DATE} + 1 day" '+%Y-%m-%d')
+
+          # 合并的 PR
+          curl -sL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/search/issues?q=repo:apache/iceberg+is:pr+is:merged+merged:${DATE}&per_page=100&sort=updated" \
+            > /tmp/merged_prs.json
+
+          # 新增 Issue
+          curl -sL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/search/issues?q=repo:apache/iceberg+is:issue+created:${DATE}&per_page=100&sort=created" \
+            > /tmp/new_issues.json
+
+          # 新增 PR
+          curl -sL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/search/issues?q=repo:apache/iceberg+is:pr+created:${DATE}&per_page=100&sort=created" \
+            > /tmp/new_prs.json
+
+          # 统计数量
+          MERGED_COUNT=$(jq '.total_count' /tmp/merged_prs.json)
+          ISSUE_COUNT=$(jq '.total_count' /tmp/new_issues.json)
+          PR_COUNT=$(jq '.total_count' /tmp/new_prs.json)
+
+          echo "MERGED_COUNT=${MERGED_COUNT}" >> $GITHUB_ENV
+          echo "ISSUE_COUNT=${ISSUE_COUNT}" >> $GITHUB_ENV
+          echo "PR_COUNT=${PR_COUNT}" >> $GITHUB_ENV
+
+      - name: Generate markdown report
+        run: |
+          DATE="${REPORT_DATE}"
+          REPORT_FILE="daily-reports/${DATE}.md"
+          mkdir -p daily-reports
+
+          SYNC_STATUS="✅ 已同步至 \`${SYNC_AFTER:0:7}\`"
+          if [ "$SYNCED_NEW_COMMITS" = "0" ]; then
+            SYNC_STATUS="✅ 已是最新（无新提交）"
+          fi
+
+          cat > "${REPORT_FILE}" << EOF
+          # Apache Iceberg 每日动态报告
+
+          **日期：** ${DATE}
+          **生成时间：** $(date -u '+%Y-%m-%d %H:%M') UTC
+          **数据来源：** [apache/iceberg](https://github.com/apache/iceberg)
+          **Fork 同步：** ${SYNC_STATUS}
+
+          ---
+
+          ## 📊 今日概览
+
+          | 类别 | 数量 |
+          |------|------|
+          | ✅ 合并的 PR | ${MERGED_COUNT} |
+          | 🐛 新增 Issue | ${ISSUE_COUNT} |
+          | 🔀 新提交的 PR | ${PR_COUNT} |
+
+          ---
+
+          ## ✅ 已合并 PR
+
+          EOF
+
+          # 生成已合并 PR 列表
+          jq -r '.items[] | "### PR #\(.number) — \(.title)\n\n| 属性 | 详情 |\n|------|------|\n| **作者** | [@\(.user.login)](https://github.com/\(.user.login)) |\n| **合并时间** | \(.pull_request.merged_at) |\n| **标签** | \(.labels | map("`\(.name)`") | join(" ")) |\n| **PR 链接** | \(.html_url) |\n\n> \(.body | gsub("\r\n";" ") | .[0:300])...\n\n---\n"' \
+            /tmp/merged_prs.json >> "${REPORT_FILE}"
+
+          cat >> "${REPORT_FILE}" << EOF
+
+          ## 🐛 新增 Issue
+
+          EOF
+
+          # 生成新增 Issue 列表
+          jq -r '.items[] | "### Issue #\(.number) — \(.title)\n\n| 属性 | 详情 |\n|------|------|\n| **提交者** | [@\(.user.login)](https://github.com/\(.user.login)) |\n| **创建时间** | \(.created_at) |\n| **标签** | \(.labels | map("`\(.name)`") | join(" ")) |\n| **状态** | \(.state) |\n| **Issue 链接** | \(.html_url) |\n\n> \(.body | gsub("\r\n";" ") | .[0:500])...\n\n---\n"' \
+            /tmp/new_issues.json >> "${REPORT_FILE}"
+
+          cat >> "${REPORT_FILE}" << EOF
+
+          ## 🔀 新提交的 PR
+
+          | # | 标题 | 作者 | 标签 | 状态 |
+          |---|------|------|------|------|
+          EOF
+
+          # 生成新增 PR 表格
+          jq -r '.items[] | "| [#\(.number)](\(.html_url)) | \(.title) | [@\(.user.login)](https://github.com/\(.user.login)) | \(.labels | map("`\(.name)`") | join(" ")) | \(.state) |"' \
+            /tmp/new_prs.json >> "${REPORT_FILE}"
+
+          cat >> "${REPORT_FILE}" << EOF
+
+          ---
+
+          *报告由 [vinlee19/iceberg](https://github.com/vinlee19/iceberg) fork 同步流水线自动生成*
+          *Fork 最新提交：\`${SYNC_AFTER:0:7}\` | 上游参考：[apache/iceberg](https://github.com/apache/iceberg)*
+          EOF
+
+          echo "REPORT_FILE=${REPORT_FILE}" >> $GITHUB_ENV
+          echo "Report generated: ${REPORT_FILE}"
+          wc -l "${REPORT_FILE}"
+
+      - name: Commit and push report + sync
+        run: |
+          git add daily-reports/
+
+          # 只有当有变化时才提交
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Daily report: apache/iceberg activity for ${REPORT_DATE}
+
+  - Merged PRs: ${MERGED_COUNT}
+  - New Issues: ${ISSUE_COUNT}
+  - New PRs: ${PR_COUNT}
+  - Fork synced: ${SYNCED_NEW_COMMITS} new upstream commits"
+          fi
+
+          # 推送同步的上游变更 + 报告
+          git push origin main
+
+      - name: Summary
+        run: |
+          echo "## 📋 Daily Sync & Report Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| 项目 | 结果 |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 报告日期 | ${REPORT_DATE} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 同步新提交数 | ${SYNCED_NEW_COMMITS} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 合并 PR 数 | ${MERGED_COUNT} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 新增 Issue 数 | ${ISSUE_COUNT} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 新建 PR 数 | ${PR_COUNT} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "报告文件：\`${REPORT_FILE}\`" >> $GITHUB_STEP_SUMMARY
