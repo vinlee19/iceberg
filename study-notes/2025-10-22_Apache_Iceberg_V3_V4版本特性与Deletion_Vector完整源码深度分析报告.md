@@ -1,8 +1,42 @@
-# 2025-10-22 Apache Iceberg V3/V4版本特性与Deletion Vector完整源码深度分析报告
+# Apache Iceberg V3/V4版本特性与Deletion Vector完整源码深度分析报告
+
+> **初稿**：2025-10-22（基于 Iceberg 1.10.x）｜ **最后更新**：2026-08-15（基于 main @ fdb972e595 重新取证，见下方复核章节）
 
 ## 一、前言
 
 本报告基于Apache Iceberg 1.10.x分支源码，深入分析Iceberg表格式版本演进（V2/V3/V4）的核心特性、Deletion Vector机制、Puffin文件格式、Row Lineage追踪以及Statistics文件系统。通过源码级别的剖析，帮助读者全面理解Iceberg在删除性能优化、数据血缘、统计信息管理等方面的创新设计。
+
+## ⚠️ 2026-08-15 复核更新（基于 main @ fdb972e595 重新取证）
+
+> 本文写作于 2025-10（1.10.x 时期）。2026-08-15 基于最新 main 分支重新分析后，以下结论以本节为准，正文中与之冲突的内容（尤其是 7.4 节旧版的"V4 预期特性"）均已过时。
+
+![Iceberg 表格式版本演进](svg/iceberg_format_version_evolution.svg)
+
+### V3 定稿要点（与正文一致，补充两处修正）
+
+V3 六大特性（DV、Row Lineage、新类型、列默认值、表加密、多参数变换）均已定稿，规范清单见 `format/spec.md:47-58`。两处修正：
+
+1. **V3 禁止新写 position delete 文件**，不是"可选优化"：`MergingSnapshotProducer.java:295-316` 提交时硬校验，非 equality delete 必须是 DV，否则抛 `"Must use DVs for position deletes in V3"`。equality delete 在 v3 仍合法。
+2. **多参数分区变换（source-ids）只有规范，Java 实现至今缺失**：`PartitionSpecParser`/`SortOrderParser` 仍只认单个 `source-id`。
+
+![V2 Position Delete vs V3 Deletion Vector](svg/iceberg_v3_deletion_vector.svg)
+
+### V4 真实进展（截至 2026-08，与旧版 7.4 节的猜测差异很大）
+
+`SUPPORTED_TABLE_FORMAT_VERSION = 4`（`TableMetadata.java:58`），Java 侧已可建 v4 表，但规范明确标注 **"under active development and has not been formally adopted"**（`format/spec.md:29`），REST catalog OpenAPI 仍限制 `format-version ≤ 3`。进度分三档：
+
+| 状态 | 内容 | 证据 |
+|---|---|---|
+| ✅ 已落地接入写路径 | **Parquet manifests**（v4 表 manifest 从 Avro 自动切 Parquet） | `SnapshotProducer.java:144-147`、`ManifestFiles.java:306` |
+| ✅ 已落地 | **metadata `location` 可选**（为相对路径铺路） | `TableMetadata.java:316-325` |
+| 🚧 合入但未接主链路 | **TrackedFile 统一文件模型**（data/eq-delete/manifest 统一条目，DV 内联；content_type 枚举中已无 position delete） | `core/.../TrackedFile.java` |
+| 🚧 合入但未接主链路 | **content_stats 类型化列统计**（ID 规则 `10000+200×field_id`，读侧 `InclusiveStatsEvaluator` 已有，**写侧未落地**，当前 V4Writer 写的仍是 v3 entry 结构） | `StatsUtil.java:37-60`、`InclusiveStatsEvaluator.java` |
+| 🚧 合入但未接主链路 | **相对路径**（V4 章节目前唯一正式规范特性；`relativizeLocation` 工具已有但全仓无调用方） | `format/spec.md:60-66,187-227`、`LocationUtil.java:122` |
+| ⛏️ 仅地基 | **root manifest / 自适应元数据树 / 单文件提交**：无写入器、无规范文本，只有类型痕迹（`ManifestInfo` 注释、`FileContent.DATA_MANIFEST/DELETE_MANIFEST`、`EntryStatus.REPLACED/MODIFIED`） | `ManifestInfo.java:24`、`FileContent.java:28` |
+
+![V4 元数据层重构方向](svg/iceberg_v4_metadata_direction.svg)
+
+---
 
 ## 二、Iceberg表格式版本概览
 
@@ -803,8 +837,8 @@ SELECT * FROM sales WHERE sale_date >= '2024-01-01';
 
 | 特性 | V1 | V2 (默认) | V3 (MIN_ROW_LINEAGE) | V4 (SUPPORTED) |
 |------|----|-----------|-----------------------|----------------|
-| **默认状态** | 已废弃 | ✅ 默认版本 | ⚠️ 可选 | ⚠️ 预览 |
-| **Delete Files** | Position/Equality | Position/Equality | Position/Equality/DV | Position/Equality/DV |
+| **默认状态** | 已废弃 | ✅ 默认版本 | ✅ 已定稿可选 | 🚧 开发中（规范未正式采纳） |
+| **Delete Files** | Position/Equality | Position/Equality | Equality/DV（禁止新写 position delete） | Equality/DV（TrackedFile 中已无 position delete 类型） |
 | **Deletion Vector** | ❌ | ❌ | ✅ | ✅ |
 | **Row Lineage** | ❌ | ❌ | ✅ | ✅ |
 | **Puffin Files** | ❌ | ❌ | ✅ | ✅ |
@@ -813,8 +847,8 @@ SELECT * FROM sales WHERE sale_date >= '2024-01-01';
 | **行级事务** | ❌ | ❌ | ⚠️ Limited | ✅ |
 | **_row_id列** | ❌ | ❌ | ✅ | ✅ |
 | **_last_updated_seq列** | ❌ | ❌ | ✅ | ✅ |
-| **Manifest List格式** | V1 | V2 | V3 | V4 |
-| **Manifest格式** | V1 | V2 | V3 | V4 |
+| **Manifest List格式** | V1 (Avro) | V2 (Avro) | V3 (Avro) | V4 |
+| **Manifest格式** | V1 (Avro) | V2 (Avro) | V3 (Avro，V3Writer 强制) | V4 (**Parquet**) |
 
 ### 7.2 Manifest格式演进
 
@@ -836,13 +870,13 @@ SELECT * FROM sales WHERE sale_date >= '2024-01-01';
 - 支持Deletion Vector引用
 - 增强的统计信息
 
-**V4 Manifest** (`ManifestWriter.java:248`)：
+**V4 Manifest**（`ManifestWriter.java:271-355`，V4Writer/V4DeleteWriter，2026-08 复核更新）：
 ```java
 .meta("format-version", "4")
 ```
-- 进一步优化的Row Lineage支持
-- 完整的行级事务隔离
-- 分区统计文件集成
+- 文件格式从 Avro 切换为 **Parquet**（`SnapshotProducer.java:144-147`，v4 表自动切换）
+- entry 结构目前**仍沿用 v3 的 data_file schema**（含 lower_bounds/upper_bounds 等 map，content_stats 尚未替换，见 `V4Metadata.java:285-312`）
+- 未分区表的 manifest 省略 partition 字段（Parquet 不能表示空 group），读侧兼容见 `ManifestReader.java:309-325`
 
 ### 7.3 V3关键能力详解
 
@@ -908,28 +942,27 @@ writer.add(sketchBlob);
 writer.finish();
 ```
 
-### 7.4 V4预览特性
+### 7.4 V4实际进展（2026-08-15 复核重写）
 
-**V4当前状态：** SUPPORTED_TABLE_FORMAT_VERSION = 4，但未作为默认版本
+> 本节旧版基于猜测列出了"行级锁 / 动态分区策略 / 原生 CDC"等预期特性，并引用了一段实际不存在的 `MergingSnapshotProducer` 代码，均不成立，已整体重写。
 
-**预期V4特性：**
-1. **完整的行级ACID**：类似MySQL的行级锁机制
-2. **增强的Partition Evolution**：支持动态分区策略调整
-3. **统一的Delete机制**：Deletion Vector成为默认删除方式
-4. **改进的Manifest合并**：减少小文件问题
-5. **原生CDC支持**：直接输出变更流
+**V4当前状态：** `SUPPORTED_TABLE_FORMAT_VERSION = 4`（`TableMetadata.java:58`），Java 侧已可通过 `format-version=4` 建表/升级（无 experimental 开关），但 `format/spec.md:29` 明确标注 v4 "under active development and has not been formally adopted"；REST catalog OpenAPI 仍限制 `format-version ≤ 3`。**V4 主题是重做元数据层，面向高频提交和超大表。**
 
-**从代码推断的V4方向** (`MergingSnapshotProducer.java:306`)：
-```java
-if (formatVersion() >= 4) {
-  // 可能启用的新特性
-  // - Unified Delete Format
-  // - Enhanced Row Lineage
-  // - Native CDC Stream
-} else {
-  throw new IllegalArgumentException("Unsupported format version: " + formatVersion());
-}
-```
+**已落地并接入写路径（仅 3 项）：**
+1. **Parquet manifests**：v4 表提交时 manifest 从 Avro 自动切为 Parquet（`SnapshotProducer.java:144-147`，`ManifestFiles.java:306` `case 4 -> V4Writer`）
+2. **metadata `location` 可选**：`TableMetadata.java:316-325`，为相对路径铺路
+3. **V4 manifest/manifest-list writer 分支**：注意 entry 结构仍是 v3 那套
+
+**已合入但未接主链路（类型/工具层）：**
+4. **TrackedFile 统一文件模型**（`core/.../TrackedFile.java`）：一个 struct 统一表示 data file、equality delete、乃至 manifest 本身；DV 内联为条目字段；content_type 枚举中**已无 position delete 类型**（v4 层面 DV 是唯一位置删除形态）
+5. **content_stats 类型化列统计**（`StatsUtil.java:37-60`）：字段 ID 规则 `10000 + 200×field_id`，取代 v3 的二进制 map；读侧求值器 `InclusiveStatsEvaluator` 已合入，**写侧尚未产出**（parquet/orc 模块中 grep FieldStats 零命中）
+6. **相对路径**：V4 章节目前**唯一正式写入规范**的特性（`format/spec.md:60-66, 187-227`）；`LocationUtil.relativizeLocation` 已有但全仓无调用方，读侧仅 `V4ManifestReader.java:155-168` 会做解析
+7. **V4ManifestReader**（`core/.../V4ManifestReader.java`）：可独立使用，但 scan 主链路仍走老 `ManifestReader`
+
+**仅有地基（无实现、无规范文本）：**
+8. **root manifest / 自适应元数据树 / 单文件提交**：只有类型痕迹——`ManifestInfo.java:24` 注释提到 "root manifest entry"、`FileContent` 新增 `DATA_MANIFEST(3)`/`DELETE_MANIFEST(4)`（manifest 可被 manifest 嵌套追踪）、`EntryStatus` 新增 `REPLACED(3)`/`MODIFIED(4)`（条目原地修改，避免重写整份 manifest）。愿景：小提交只写一个文件，表大了自适应展开成树。
+
+![V4 元数据层重构方向](svg/iceberg_v4_metadata_direction.svg)
 
 ---
 

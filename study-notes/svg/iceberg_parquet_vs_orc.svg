@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="740" viewBox="0 0 980 740" font-family="'PingFang SC','Microsoft YaHei','Helvetica Neue',Arial,sans-serif">
+  <rect width="980" height="740" fill="#ffffff"/>
+  <text x="490" y="34" text-anchor="middle" font-size="19" font-weight="700" fill="#1f2328">Iceberg 中 Parquet vs ORC 支持度（main @ fdb972e595，2026-08-15）</text>
+
+  <!-- header -->
+  <rect x="20" y="56" width="940" height="36" rx="6" fill="#eaeef2"/>
+  <text x="40" y="80" font-size="13.5" font-weight="700" fill="#1f2328">维度</text>
+  <text x="290" y="80" font-size="13.5" font-weight="700" fill="#0969da">Parquet（默认格式）</text>
+  <text x="650" y="80" font-size="13.5" font-weight="700" fill="#9a6700">ORC</text>
+
+  <!-- rows: y = 100 + i*56 -->
+  <!-- row bg alternating -->
+  <rect x="20" y="100" width="940" height="56" fill="#f6f8fa"/>
+  <rect x="20" y="212" width="940" height="56" fill="#f6f8fa"/>
+  <rect x="20" y="324" width="940" height="56" fill="#f6f8fa"/>
+  <rect x="20" y="436" width="940" height="56" fill="#f6f8fa"/>
+  <rect x="20" y="548" width="940" height="56" fill="#f6f8fa"/>
+
+  <!-- Row 1 -->
+  <text x="40" y="132" font-size="13" fill="#1f2328">默认文件格式</text>
+  <rect x="290" y="114" width="52" height="22" rx="11" fill="#dafbe1"/><text x="316" y="129" text-anchor="middle" font-size="11.5" fill="#1a7f37">默认</text>
+  <text x="352" y="130" font-size="12" fill="#57606a">write.format.default = parquet</text>
+  <rect x="650" y="114" width="76" height="22" rx="11" fill="#fff8c5"/><text x="688" y="129" text-anchor="middle" font-size="11.5" fill="#9a6700">需显式设置</text>
+
+  <!-- Row 2 -->
+  <text x="40" y="184" font-size="13" fill="#1f2328">Spark 向量化读取</text>
+  <rect x="290" y="170" width="52" height="22" rx="11" fill="#dafbe1"/><text x="316" y="185" text-anchor="middle" font-size="11.5" fill="#1a7f37">完整</text>
+  <text x="352" y="180" font-size="12" fill="#57606a">默认开启；有 delete 文件仍可向量化；</text>
+  <text x="352" y="196" font-size="12" fill="#57606a">背后有完整 Arrow 栈（Comet 已移除）</text>
+  <rect x="650" y="170" width="52" height="22" rx="11" fill="#ffebe9"/><text x="676" y="185" text-anchor="middle" font-size="11.5" fill="#cf222e">受限</text>
+  <text x="712" y="180" font-size="12" fill="#57606a">默认关闭；有 delete 即退回行式读</text>
+  <text x="712" y="196" font-size="12" fill="#57606a">(SparkBatch.java:231)</text>
+
+  <!-- Row 3 -->
+  <text x="40" y="244" font-size="13" fill="#1f2328">读侧行组/条带剪枝</text>
+  <rect x="290" y="226" width="52" height="22" rx="11" fill="#dafbe1"/><text x="316" y="241" text-anchor="middle" font-size="11.5" fill="#1a7f37">三层</text>
+  <text x="352" y="236" font-size="12" fill="#57606a">stats + 字典 + bloom 三个 RowGroupFilter</text>
+  <text x="352" y="252" font-size="12" fill="#57606a">(ReadConf.java:94-100)</text>
+  <rect x="650" y="226" width="52" height="22" rx="11" fill="#fff8c5"/><text x="676" y="241" text-anchor="middle" font-size="11.5" fill="#9a6700">单层</text>
+  <text x="712" y="236" font-size="12" fill="#57606a">仅转 SearchArgument 交给 ORC 库，</text>
+  <text x="712" y="252" font-size="12" fill="#57606a">无字典/bloom 剪枝实现</text>
+
+  <!-- Row 4 -->
+  <text x="40" y="300" font-size="13" fill="#1f2328">Bloom Filter 配置</text>
+  <rect x="290" y="282" width="52" height="22" rx="11" fill="#dafbe1"/><text x="316" y="297" text-anchor="middle" font-size="11.5" fill="#1a7f37">精细</text>
+  <text x="352" y="292" font-size="12" fill="#57606a">逐列开关/FPP/NDV/自适应/大小上限</text>
+  <rect x="650" y="282" width="64" height="22" rx="11" fill="#fff8c5"/><text x="682" y="297" text-anchor="middle" font-size="11.5" fill="#9a6700">粗粒度</text>
+  <text x="724" y="292" font-size="12" fill="#57606a">仅列名列表 + 全局 FPP 两个旋钮</text>
+
+  <!-- Row 5 -->
+  <text x="40" y="352" font-size="13" fill="#1f2328">variant 类型（V3）</text>
+  <rect x="290" y="338" width="52" height="22" rx="11" fill="#dafbe1"/><text x="316" y="353" text-anchor="middle" font-size="11.5" fill="#1a7f37">完整</text>
+  <text x="352" y="348" font-size="12" fill="#57606a">6 个专用读写类，支持 shredding</text>
+  <text x="352" y="364" font-size="12" fill="#57606a">（子字段列式化 + 子字段 metrics）</text>
+  <rect x="650" y="338" width="52" height="22" rx="11" fill="#fff8c5"/><text x="676" y="353" text-anchor="middle" font-size="11.5" fill="#9a6700">半残</text>
+  <text x="712" y="348" font-size="12" fill="#57606a">仅 Generic 路径可用；Spark 引擎侧零支持；</text>
+  <text x="712" y="364" font-size="12" fill="#57606a">无 shredding；visitor 默认抛异常</text>
+
+  <!-- Row 6 -->
+  <text x="40" y="408" font-size="13" fill="#1f2328">geometry / geography（V3）</text>
+  <rect x="290" y="394" width="52" height="22" rx="11" fill="#dafbe1"/><text x="316" y="409" text-anchor="middle" font-size="11.5" fill="#1a7f37">完整</text>
+  <text x="352" y="404" font-size="12" fill="#57606a">原生 logical type + geo metrics</text>
+  <rect x="650" y="394" width="52" height="22" rx="11" fill="#ffebe9"/><text x="676" y="409" text-anchor="middle" font-size="11.5" fill="#cf222e">缺失</text>
+  <text x="712" y="404" font-size="12" fill="#57606a">零实现，直接抛 Unhandled type</text>
+  <text x="712" y="420" font-size="12" fill="#57606a">(ORCSchemaUtil.java:260)</text>
+
+  <!-- Row 7 -->
+  <text x="40" y="464" font-size="13" fill="#1f2328">timestamp_ns（V3）</text>
+  <rect x="290" y="450" width="52" height="22" rx="11" fill="#dafbe1"/><text x="316" y="465" text-anchor="middle" font-size="11.5" fill="#1a7f37">原生</text>
+  <text x="352" y="460" font-size="12" fill="#57606a">TIMESTAMP_NANOS logical type</text>
+  <rect x="650" y="450" width="52" height="22" rx="11" fill="#fff8c5"/><text x="676" y="465" text-anchor="middle" font-size="11.5" fill="#9a6700">hack</text>
+  <text x="712" y="460" font-size="12" fill="#57606a">属性编码 iceberg.timestamp-unit=NANOS，</text>
+  <text x="712" y="476" font-size="12" fill="#57606a">其他引擎读不懂</text>
+
+  <!-- Row 8 -->
+  <text x="40" y="520" font-size="13" fill="#1f2328">原生加密</text>
+  <rect x="290" y="506" width="52" height="22" rx="11" fill="#dafbe1"/><text x="316" y="521" text-anchor="middle" font-size="11.5" fill="#1a7f37">完整</text>
+  <text x="352" y="516" font-size="12" fill="#57606a">Parquet Modular Encryption</text>
+  <text x="352" y="532" font-size="12" fill="#57606a">（列级 / footer / AAD）</text>
+  <rect x="650" y="506" width="52" height="22" rx="11" fill="#ffebe9"/><text x="676" y="521" text-anchor="middle" font-size="11.5" fill="#cf222e">禁止</text>
+  <text x="712" y="516" font-size="12" fill="#57606a">"Native ORC encryption is not supported"</text>
+  <text x="712" y="532" font-size="12" fill="#57606a">(ORC.java:114-117)，只能整文件流加密</text>
+
+  <!-- Row 9 -->
+  <text x="40" y="576" font-size="13" fill="#1f2328">delete 文件写入</text>
+  <rect x="290" y="562" width="52" height="22" rx="11" fill="#dafbe1"/><text x="316" y="577" text-anchor="middle" font-size="11.5" fill="#1a7f37">支持</text>
+  <text x="352" y="572" font-size="12" fill="#57606a">position + equality 均可</text>
+  <rect x="650" y="562" width="52" height="22" rx="11" fill="#dafbe1"/><text x="676" y="577" text-anchor="middle" font-size="11.5" fill="#1a7f37">支持</text>
+  <text x="712" y="572" font-size="12" fill="#57606a">唯一完全对等项；DV 是 Puffin，与数据格式无关</text>
+
+  <!-- Row 10 -->
+  <text x="40" y="632" font-size="13" fill="#1f2328">默认压缩</text>
+  <rect x="290" y="618" width="52" height="22" rx="11" fill="#dafbe1"/><text x="316" y="633" text-anchor="middle" font-size="11.5" fill="#1a7f37">zstd</text>
+  <text x="352" y="628" font-size="12" fill="#57606a">新表自动写入 zstd（1.4.0 起）</text>
+  <rect x="650" y="618" width="52" height="22" rx="11" fill="#fff8c5"/><text x="676" y="633" text-anchor="middle" font-size="11.5" fill="#9a6700">zlib</text>
+  <text x="712" y="628" font-size="12" fill="#57606a">停在 zlib，无升级机制</text>
+
+  <line x1="20" y1="660" x2="960" y2="660" stroke="#d0d7de"/>
+  <text x="20" y="688" font-size="12.5" font-weight="700" fill="#1f2328">场景结论：新建表一律 Parquet；ORC 仅用于 Hive 生态存量迁移（migrate/snapshot 原地转表保留 ORC 读）。</text>
+  <text x="20" y="710" font-size="12" fill="#57606a">Iceberg 支持同表混合文件格式：旧数据保持 ORC、新写入切 Parquet，可平滑过渡。</text>
+</svg>

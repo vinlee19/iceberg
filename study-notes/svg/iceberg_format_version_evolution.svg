@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="620" viewBox="0 0 980 620" font-family="'PingFang SC','Microsoft YaHei','Helvetica Neue',Arial,sans-serif">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 z" fill="#57606a"/>
+    </marker>
+  </defs>
+  <rect width="980" height="620" fill="#ffffff"/>
+  <text x="490" y="34" text-anchor="middle" font-size="19" font-weight="700" fill="#1f2328">Apache Iceberg 表格式版本演进（复核于 2026-08-15，main @ fdb972e595）</text>
+
+  <!-- timeline -->
+  <line x1="60" y1="66" x2="930" y2="66" stroke="#8c959f" stroke-width="1.5" marker-end="url(#arr)"/>
+  <circle cx="130" cy="66" r="5" fill="#8c959f"/>
+  <circle cx="370" cy="66" r="5" fill="#0969da"/>
+  <circle cx="610" cy="66" r="5" fill="#1a7f37"/>
+  <circle cx="850" cy="66" r="5" fill="#9a6700"/>
+
+  <!-- V1 -->
+  <rect x="20" y="88" width="220" height="42" rx="8" fill="#eaeef2"/>
+  <text x="130" y="115" text-anchor="middle" font-size="15" font-weight="700" fill="#57606a">V1 · 历史版本</text>
+  <rect x="20" y="144" width="220" height="400" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+  <text x="36" y="176" font-size="13" fill="#1f2328">
+    <tspan x="36" dy="0">· 基础表格式与快照机制</tspan>
+    <tspan x="36" dy="24">· Schema / 分区规范演进</tspan>
+    <tspan x="36" dy="24">· 只有 Copy-on-Write：</tspan>
+    <tspan x="48" dy="20">删除 = 重写整个数据文件</tspan>
+    <tspan x="36" dy="28">· 分析型只读/批量替换场景</tspan>
+  </text>
+
+  <!-- V2 -->
+  <rect x="260" y="88" width="220" height="42" rx="8" fill="#ddf4ff"/>
+  <text x="370" y="115" text-anchor="middle" font-size="15" font-weight="700" fill="#0969da">V2 · 当前默认</text>
+  <rect x="260" y="144" width="220" height="400" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+  <text x="276" y="176" font-size="13" fill="#1f2328">
+    <tspan x="276" dy="0">· 行级删除（Merge-on-Read）</tspan>
+    <tspan x="276" dy="24">· position delete 文件</tspan>
+    <tspan x="276" dy="24">· equality delete 文件</tspan>
+    <tspan x="276" dy="24">· sequence number 隔离机制</tspan>
+    <tspan x="276" dy="28">· DEFAULT_TABLE_FORMAT_</tspan>
+    <tspan x="288" dy="20">VERSION = 2</tspan>
+    <tspan x="288" dy="20">(TableMetadata.java:57)</tspan>
+  </text>
+
+  <!-- V3 -->
+  <rect x="500" y="88" width="220" height="42" rx="8" fill="#dafbe1"/>
+  <text x="610" y="115" text-anchor="middle" font-size="15" font-weight="700" fill="#1a7f37">V3 · 已定稿稳定</text>
+  <rect x="500" y="144" width="220" height="400" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+  <text x="516" y="176" font-size="13" fill="#1f2328">
+    <tspan x="516" dy="0" font-weight="700">主题：高效行级变更+扩展类型</tspan>
+    <tspan x="516" dy="26">· Deletion Vector（Puffin）</tspan>
+    <tspan x="528" dy="20" fill="#cf222e">强制取代 position delete</tspan>
+    <tspan x="516" dy="26">· Row Lineage（v3 强制启用）</tspan>
+    <tspan x="528" dy="20">_row_id / _last_updated_seq</tspan>
+    <tspan x="516" dy="26">· 新类型：variant / geometry /</tspan>
+    <tspan x="528" dy="20">geography / ts_ns / unknown</tspan>
+    <tspan x="516" dy="26">· 列默认值 initial/write-default</tspan>
+    <tspan x="516" dy="24">· 表加密 encryption-keys</tspan>
+    <tspan x="516" dy="24">· 多参数变换 source-ids</tspan>
+    <tspan x="528" dy="20" fill="#9a6700">（规范已定，Java 未实现）</tspan>
+  </text>
+
+  <!-- V4 -->
+  <rect x="740" y="88" width="220" height="42" rx="8" fill="#fff8c5"/>
+  <text x="850" y="115" text-anchor="middle" font-size="15" font-weight="700" fill="#9a6700">V4 · 开发中（未正式采纳）</text>
+  <rect x="740" y="144" width="220" height="400" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+  <text x="756" y="176" font-size="13" fill="#1f2328">
+    <tspan x="756" dy="0" font-weight="700">主题：重做元数据层</tspan>
+    <tspan x="756" dy="26" fill="#1a7f37" font-weight="700">【已落地】</tspan>
+    <tspan x="756" dy="20">· Parquet manifests</tspan>
+    <tspan x="756" dy="20">· metadata location 可选</tspan>
+    <tspan x="756" dy="26" fill="#9a6700" font-weight="700">【进行中·未接主链路】</tspan>
+    <tspan x="756" dy="20">· TrackedFile 统一文件模型</tspan>
+    <tspan x="756" dy="20">· content_stats 类型化统计</tspan>
+    <tspan x="756" dy="20">· 相对路径（规范定稿）</tspan>
+    <tspan x="756" dy="26" fill="#cf222e" font-weight="700">【仅地基】</tspan>
+    <tspan x="756" dy="20">· root manifest 自适应树</tspan>
+    <tspan x="756" dy="20">· 单文件提交</tspan>
+  </text>
+
+  <text x="20" y="580" font-size="12" fill="#57606a">依据：core/.../TableMetadata.java:57-61（SUPPORTED=4 / DEFAULT=2）· format/spec.md:29「v4 under active development and has not been formally adopted」</text>
+  <text x="20" y="600" font-size="12" fill="#57606a">升级：ALTER TABLE ... SET TBLPROPERTIES ('format-version'='3')，单向不可降级；REST catalog OpenAPI 目前仍限 format-version ≤ 3</text>
+</svg>

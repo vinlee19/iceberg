@@ -1,4 +1,6 @@
-# 2025-10-22_Apache Iceberg Parquet ORC底层存储优化与物理结构深度分析_第二部分
+# Apache Iceberg Parquet ORC底层存储优化与物理结构深度分析_第二部分
+
+> **初稿**：2025-10-22（Iceberg 1.10.x）｜ **最后更新**：2026-08-15。最新的 Parquet vs ORC 支持度结论与修正（Comet 移除、ORC 向量化限制、V3 新类型差距、加密分水岭等）见第一部分开头的「2026-08-15 复核更新」章节及对比图 `svg/iceberg_parquet_vs_orc.svg`，正文与之冲突处以复核章节为准。
 
 ## 目录
 

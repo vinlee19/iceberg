@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="640" viewBox="0 0 980 640" font-family="'PingFang SC','Microsoft YaHei','Helvetica Neue',Arial,sans-serif">
+  <defs>
+    <marker id="arrN" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 z" fill="#57606a"/>
+    </marker>
+  </defs>
+  <rect width="980" height="640" fill="#ffffff"/>
+  <text x="490" y="34" text-anchor="middle" font-size="19" font-weight="700" fill="#1f2328">V4 元数据层重构：现状 vs 方向（截至 2026-08-15）</text>
+
+  <!-- Section A: current -->
+  <rect x="20" y="56" width="940" height="170" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
+  <text x="40" y="84" font-size="14" font-weight="700" fill="#1f2328">现状（V1–V3）：固定四层元数据链，每层独立文件</text>
+
+  <rect x="50" y="104" width="180" height="48" rx="6" fill="#ffffff" stroke="#8c959f"/>
+  <text x="140" y="133" text-anchor="middle" font-size="12.5" fill="#1f2328">metadata.json</text>
+  <rect x="290" y="104" width="180" height="48" rx="6" fill="#ffffff" stroke="#8c959f"/>
+  <text x="380" y="126" text-anchor="middle" font-size="12.5" fill="#1f2328">manifest-list.avro</text>
+  <text x="380" y="144" text-anchor="middle" font-size="11" fill="#57606a">（每快照一份）</text>
+  <rect x="530" y="104" width="180" height="48" rx="6" fill="#ffffff" stroke="#8c959f"/>
+  <text x="620" y="126" text-anchor="middle" font-size="12.5" fill="#1f2328">manifest.avro × N</text>
+  <text x="620" y="144" text-anchor="middle" font-size="11" fill="#57606a">（data / delete 分开）</text>
+  <rect x="770" y="104" width="160" height="48" rx="6" fill="#ffffff" stroke="#8c959f"/>
+  <text x="850" y="133" text-anchor="middle" font-size="12.5" fill="#1f2328">data / delete files</text>
+
+  <line x1="230" y1="128" x2="288" y2="128" stroke="#57606a" stroke-width="1.5" marker-end="url(#arrN)"/>
+  <line x1="470" y1="128" x2="528" y2="128" stroke="#57606a" stroke-width="1.5" marker-end="url(#arrN)"/>
+  <line x1="710" y1="128" x2="768" y2="128" stroke="#57606a" stroke-width="1.5" marker-end="url(#arrN)"/>
+
+  <text x="50" y="192" font-size="12.5" fill="#cf222e">痛点：一次提交至少重写 新manifest + 整份manifest-list + metadata.json —— 流式高频小提交时元数据写放大严重；列统计是无类型的二进制 map，难演进</text>
+
+  <!-- Section B: v4 direction -->
+  <rect x="20" y="246" width="940" height="240" rx="10" fill="#fffdf0" stroke="#eed888"/>
+  <text x="40" y="274" font-size="14" font-weight="700" fill="#1f2328">V4 方向：TrackedFile 统一条目 + root manifest 自适应元数据树（分阶段落地中）</text>
+
+  <rect x="50" y="300" width="150" height="48" rx="6" fill="#ffffff" stroke="#8c959f"/>
+  <text x="125" y="329" text-anchor="middle" font-size="12.5" fill="#1f2328">metadata.json</text>
+  <text x="125" y="366" text-anchor="middle" font-size="11" fill="#1a7f37">location 可选（已落地）</text>
+
+  <rect x="260" y="292" width="300" height="150" rx="8" fill="#ffffff" stroke="#9a6700" stroke-width="1.5"/>
+  <text x="410" y="314" text-anchor="middle" font-size="12.5" font-weight="700" fill="#9a6700">root manifest（Parquet 格式）</text>
+  <rect x="274" y="326" width="272" height="26" rx="4" fill="#fff8c5"/>
+  <text x="410" y="343" text-anchor="middle" font-size="11" fill="#7d4e00">TrackedFile: data file + 内联DV + content_stats</text>
+  <rect x="274" y="358" width="272" height="26" rx="4" fill="#fff8c5"/>
+  <text x="410" y="375" text-anchor="middle" font-size="11" fill="#7d4e00">TrackedFile: equality delete file</text>
+  <rect x="274" y="390" width="272" height="26" rx="4" fill="#fff8c5"/>
+  <text x="410" y="407" text-anchor="middle" font-size="11" fill="#7d4e00">TrackedFile: 子 manifest（DATA/DELETE_MANIFEST）</text>
+  <text x="410" y="432" text-anchor="middle" font-size="10.5" fill="#57606a">小表：条目全部内联，一次提交一个文件；大表：展开成树</text>
+
+  <line x1="200" y1="324" x2="258" y2="324" stroke="#57606a" stroke-width="1.5" marker-end="url(#arrN)"/>
+
+  <rect x="640" y="300" width="140" height="44" rx="6" fill="#ffffff" stroke="#8c959f"/>
+  <text x="710" y="327" text-anchor="middle" font-size="12" fill="#1f2328">子 manifest × N</text>
+  <rect x="820" y="300" width="120" height="44" rx="6" fill="#ffffff" stroke="#8c959f"/>
+  <text x="880" y="327" text-anchor="middle" font-size="12" fill="#1f2328">data files</text>
+  <line x1="546" y1="403" x2="638" y2="330" stroke="#57606a" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#arrN)"/>
+  <line x1="780" y1="322" x2="818" y2="322" stroke="#57606a" stroke-width="1.5" marker-end="url(#arrN)"/>
+  <text x="710" y="366" text-anchor="middle" font-size="10.5" fill="#57606a">EntryStatus 新增</text>
+  <text x="710" y="382" text-anchor="middle" font-size="10.5" fill="#57606a">REPLACED / MODIFIED</text>
+  <text x="710" y="398" text-anchor="middle" font-size="10.5" fill="#57606a">（条目原地修改）</text>
+
+  <!-- Legend -->
+  <rect x="20" y="506" width="940" height="96" rx="10" fill="#f6f8fa" stroke="#d0d7de"/>
+  <rect x="40" y="524" width="12" height="12" rx="3" fill="#1a7f37"/>
+  <text x="60" y="535" font-size="12.5" fill="#1f2328">已落地并接入写路径：Parquet manifests（SnapshotProducer.java:144）· location 可选（TableMetadata.java:316）· V4Writer/V4DeleteWriter 分支</text>
+  <rect x="40" y="550" width="12" height="12" rx="3" fill="#9a6700"/>
+  <text x="60" y="561" font-size="12.5" fill="#1f2328">已合入但未接主链路：TrackedFile（TrackedFile.java）· content_stats + InclusiveStatsEvaluator（读侧有、写侧无）· V4ManifestReader（仅测试调用）· 相对路径工具</text>
+  <rect x="40" y="576" width="12" height="12" rx="3" fill="#cf222e"/>
+  <text x="60" y="587" font-size="12.5" fill="#1f2328">仅地基/无实现：root manifest 写入器 · 单文件提交 · 自适应树（规范 spec.md 尚未收录；仅 ManifestInfo/FileContent.DATA_MANIFEST 等类型存在）</text>
+
+  <text x="20" y="626" font-size="12" fill="#57606a">规范状态：format/spec.md:29 明确「v4 under active development and has not been formally adopted」；V4 章节目前唯一正式特性是相对路径（spec.md:60-66, 187-227）</text>
+</svg>

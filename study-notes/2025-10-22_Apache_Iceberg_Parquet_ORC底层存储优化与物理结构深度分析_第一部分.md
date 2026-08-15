@@ -1,12 +1,32 @@
-# 2025-10-22 Apache Iceberg Parquet & ORC 底层存储优化与物理结构深度分析 (第一部分)
+# Apache Iceberg Parquet & ORC 底层存储优化与物理结构深度分析 (第一部分)
 
 ## 文档概览
 
 **作者**: Claude Code Analysis
-**日期**: 2025年10月22日
-**版本**: Apache Iceberg 1.10.x
+**初稿日期**: 2025年10月22日（Apache Iceberg 1.10.x）
+**最后更新**: 2026年08月15日（基于 main @ fdb972e595 重新取证，见下方复核章节）
 **分析深度**: 源码级深度剖析
 **文档类型**: 技术架构分析报告
+
+---
+
+## ⚠️ 2026-08-15 复核更新：Parquet vs ORC 支持度最新结论
+
+> 基于最新 main 分支重新分析。核心结论：**ORC 在 Iceberg 中已明显退化为"兼容存量"格式**，V3 新类型、加密、向量化、读侧剪枝四条主线全面落后；唯一与 Parquet 完全对等的是 delete 文件写入能力。正文中与本节冲突的内容以本节为准。
+
+![Iceberg 中 Parquet vs ORC 支持度对比](svg/iceberg_parquet_vs_orc.svg)
+
+**相比初稿需要修正/补充的关键事实：**
+
+1. **Comet 集成已从 main 移除**（commit `0d3544062e "Spark: Remove Apache DataFusion Comet integration"`）。正文若提及 Comet 加速 Parquet 读取，已不适用；Parquet 向量化优势现在来自 Iceberg 自带的 Arrow 栈（`arrow/.../vectorized/parquet/`，ORC 无对应模块）。
+2. **ORC 向量化限制比想象中大**：默认关闭（`TableProperties.java:271`），且只要 scan task 带 delete 文件就退回行式读（`SparkBatch.java:231`）；Parquet 默认开启且有 delete 仍可向量化。
+3. **V3 新类型差距是硬伤**：geometry/geography 在 ORC 模块**零实现**（`ORCSchemaUtil.java:260` 直接抛 `Unhandled type`）；variant 仅 Generic 读写路径可用（commit `608345b351`），Spark 引擎侧零支持、无 shredding；timestamp_ns 在 ORC 是属性 hack 编码（`iceberg.timestamp-unit=NANOS`），跨引擎不可读。
+4. **原生加密是硬分水岭**：Parquet 支持 Modular Encryption（列级/footer/AAD）；ORC 所有 native 加密路径直接 `checkArgument` 失败——`"Native ORC encryption is not supported"`（`ORC.java:114-117`）。
+5. **读侧剪枝**：Parquet 在 Iceberg 内有三层 RowGroup 过滤（stats + 字典 + bloom，`ReadConf.java:94-100`）；ORC 只把表达式转成 SearchArgument 交给 ORC 库，无字典/bloom 剪枝实现。
+6. **默认压缩**：Parquet 新表自动写入 zstd（1.4.0 起，`TableMetadata.java:96-99`）；ORC 停在 zlib，无升级机制。
+7. **对等项**：position/equality delete 文件用 Parquet/ORC/Avro 三种格式都能写（`BaseFileWriterFactory.java`）；DV 是 Puffin 格式，与数据文件格式无关。
+
+**场景结论（2026-08 版）**：新建表一律 Parquet；ORC 仅用于 Hive 生态存量迁移（`migrate`/`snapshot` procedure 原地转表保留 ORC 读）。Iceberg 支持同表混合文件格式，可旧数据保持 ORC、新写入切 Parquet 平滑过渡。
 
 ---
 

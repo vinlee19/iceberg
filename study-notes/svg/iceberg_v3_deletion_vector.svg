@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="560" viewBox="0 0 980 560" font-family="'PingFang SC','Microsoft YaHei','Helvetica Neue',Arial,sans-serif">
+  <defs>
+    <marker id="arrR" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 z" fill="#cf222e"/>
+    </marker>
+    <marker id="arrG" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 z" fill="#1a7f37"/>
+    </marker>
+  </defs>
+  <rect width="980" height="560" fill="#ffffff"/>
+  <text x="490" y="34" text-anchor="middle" font-size="19" font-weight="700" fill="#1f2328">位置删除：V2 Position Delete 文件 vs V3 Deletion Vector</text>
+
+  <!-- Left: V2 -->
+  <rect x="20" y="56" width="460" height="450" rx="10" fill="#fff5f5" stroke="#ffb1b1"/>
+  <text x="250" y="86" text-anchor="middle" font-size="15" font-weight="700" fill="#cf222e">V2 · Position Delete 文件（V3 起禁止新写）</text>
+
+  <rect x="50" y="120" width="160" height="36" rx="6" fill="#ffffff" stroke="#d0d7de"/>
+  <text x="130" y="143" text-anchor="middle" font-size="12.5" fill="#1f2328">data-A.parquet</text>
+  <rect x="50" y="190" width="160" height="36" rx="6" fill="#ffffff" stroke="#d0d7de"/>
+  <text x="130" y="213" text-anchor="middle" font-size="12.5" fill="#1f2328">data-B.parquet</text>
+
+  <rect x="300" y="104" width="150" height="30" rx="6" fill="#ffebe9" stroke="#ffb1b1"/>
+  <text x="375" y="124" text-anchor="middle" font-size="12" fill="#cf222e">pos-del-1.parquet</text>
+  <rect x="300" y="146" width="150" height="30" rx="6" fill="#ffebe9" stroke="#ffb1b1"/>
+  <text x="375" y="166" text-anchor="middle" font-size="12" fill="#cf222e">pos-del-2.parquet</text>
+  <rect x="300" y="188" width="150" height="30" rx="6" fill="#ffebe9" stroke="#ffb1b1"/>
+  <text x="375" y="208" text-anchor="middle" font-size="12" fill="#cf222e">pos-del-3.parquet</text>
+  <rect x="300" y="230" width="150" height="30" rx="6" fill="#ffebe9" stroke="#ffb1b1"/>
+  <text x="375" y="250" text-anchor="middle" font-size="12" fill="#cf222e">pos-del-4.parquet</text>
+
+  <line x1="300" y1="119" x2="212" y2="136" stroke="#cf222e" stroke-width="1.2" marker-end="url(#arrR)"/>
+  <line x1="300" y1="161" x2="212" y2="140" stroke="#cf222e" stroke-width="1.2" marker-end="url(#arrR)"/>
+  <line x1="300" y1="203" x2="212" y2="208" stroke="#cf222e" stroke-width="1.2" marker-end="url(#arrR)"/>
+  <line x1="300" y1="245" x2="212" y2="212" stroke="#cf222e" stroke-width="1.2" marker-end="url(#arrR)"/>
+  <line x1="300" y1="126" x2="212" y2="200" stroke="#cf222e" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#arrR)"/>
+
+  <text x="46" y="316" font-size="13" fill="#1f2328">
+    <tspan x="46" dy="0">· 一个数据文件可能被多个 delete 文件引用，</tspan>
+    <tspan x="58" dy="20">读取时需打开并合并全部相关文件</tspan>
+    <tspan x="46" dy="26">· 内容是 (file_path, pos) 行式记录，无位图压缩</tspan>
+    <tspan x="46" dy="26">· 高频删除 → 大量小文件，需要定期 compaction</tspan>
+    <tspan x="46" dy="26">· 读放大明显，MoR 表查询随删除次数退化</tspan>
+  </text>
+
+  <!-- Right: V3 -->
+  <rect x="500" y="56" width="460" height="450" rx="10" fill="#f2fcf5" stroke="#a7f0ba"/>
+  <text x="730" y="86" text-anchor="middle" font-size="15" font-weight="700" fill="#1a7f37">V3 · Deletion Vector（Puffin 内位图）</text>
+
+  <rect x="530" y="120" width="160" height="36" rx="6" fill="#ffffff" stroke="#d0d7de"/>
+  <text x="610" y="143" text-anchor="middle" font-size="12.5" fill="#1f2328">data-A.parquet</text>
+  <rect x="530" y="190" width="160" height="36" rx="6" fill="#ffffff" stroke="#d0d7de"/>
+  <text x="610" y="213" text-anchor="middle" font-size="12.5" fill="#1f2328">data-B.parquet</text>
+
+  <rect x="760" y="104" width="176" height="140" rx="8" fill="#ffffff" stroke="#1a7f37" stroke-width="1.5"/>
+  <text x="848" y="126" text-anchor="middle" font-size="12.5" font-weight="700" fill="#1a7f37">deletes.puffin</text>
+  <rect x="772" y="138" width="152" height="30" rx="4" fill="#dafbe1"/>
+  <text x="848" y="158" text-anchor="middle" font-size="11.5" fill="#116329">DV blob（RoaringBitmap）</text>
+  <rect x="772" y="176" width="152" height="30" rx="4" fill="#dafbe1"/>
+  <text x="848" y="196" text-anchor="middle" font-size="11.5" fill="#116329">DV blob（RoaringBitmap）</text>
+  <text x="848" y="232" text-anchor="middle" font-size="11" fill="#57606a">blob type: deletion-vector-v1</text>
+
+  <line x1="772" y1="153" x2="692" y2="138" stroke="#1a7f37" stroke-width="1.4" marker-end="url(#arrG)"/>
+  <line x1="772" y1="191" x2="692" y2="208" stroke="#1a7f37" stroke-width="1.4" marker-end="url(#arrG)"/>
+
+  <text x="526" y="290" font-size="13" fill="#1f2328">
+    <tspan x="526" dy="0">· 每个数据文件至多 1 个 DV，提交时自动合并去重</tspan>
+    <tspan x="538" dy="20">(MergingSnapshotProducer.java:1146)</tspan>
+    <tspan x="526" dy="26" fill="#cf222e">· v3/v4 提交强校验：位置删除必须写 DV，否则抛</tspan>
+    <tspan x="538" dy="20" fill="#cf222e">"Must use DVs for position deletes in V3" (:295-316)</tspan>
+    <tspan x="526" dy="26">· manifest 三个新字段定位 DV：referenced_data_file /</tspan>
+    <tspan x="538" dy="20">content_offset / content_size_in_bytes (DataFile.java:107)</tspan>
+    <tspan x="526" dy="26">· 位图常驻内存，单行是否被删 O(1) 判断</tspan>
+    <tspan x="526" dy="26">· equality delete 在 v3 仍然合法（流式 upsert 场景）</tspan>
+  </text>
+
+  <text x="20" y="536" font-size="12" fill="#57606a">写出实现：core/.../deletes/BaseDVFileWriter.java · 位图：RoaringPositionBitmap.java · 引擎自动切换：SparkWriteConf.java:245（v3+ 强制 PUFFIN）/ Flink RowDataTaskWriterFactory.java:175</text>
+</svg>
